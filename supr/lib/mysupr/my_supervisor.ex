@@ -17,6 +17,15 @@ defmodule Supr.MySupervisor do
 	def restart_child(supervisor, pid, child_spec) when is_pid(pid) do
 		GenServer.call(supervisor, {:restart, pid, child_spec})
 	end
+
+	def count_children(supervisor) do
+		GenServer.call(supervisor, :count_children)
+	end
+
+	def which_children(supervisor) do
+		GenServer.call(supervisor, :which_children)
+	end
+
 ##CALLBACK
 	
 
@@ -50,6 +59,24 @@ defmodule Supr.MySupervisor do
 		new_state = state |> HashDict.delete(from)	
 		{:noreply, new_state}
 	end
+	def handle_info({:EXIT, from, :normal}, state) do
+		new_state = state |> HashDict.delete(from)
+		{:noreply, new_state}
+	end
+	def handle_info({:EXIT, from, _reason}, state) do
+		case HashDict.fetch(state, from) do
+			{:ok, child_spec} ->
+				case restart_child(from, child_spec) do
+					{:ok, {pid, child_spec}} ->
+								new_state = state |> HashDict.delete(from) |> HashDict.put(pid, child_spec)
+							{:noreply, new_state}
+					:error ->
+						{:noreply, state}
+				end
+			_ -> 
+				{:noreply, state}
+		end
+	end
 
 	def handle_call({:restart_child, old_pid}, _from, state) do
 		case HashDict.fetch(state, old_pid) do	
@@ -67,7 +94,27 @@ defmodule Supr.MySupervisor do
 		end
 	end
 
+	def handle_call(:count_children, _from , state) do
+		{:reply, HashDict.size(state), state}
+	end
+
+	def handle_call(:which_children, _from , state) do
+		{:reply, state, state}
+	end
+
+	def terminate(_reason, state) do
+		terminate_children(state)
+		:ok
+	end
+
 #EXTRA
+
+	defp terminate_children([]) do
+		:ok
+	end
+	defp terminate_children(child_specs) do
+		child_specs |> Enum.each(fn {pid, _} -> terminate_child(pid) end)
+	end
 
 	defp restart_child(pid, child_spec) do
 		case terminate_child(pid) do
